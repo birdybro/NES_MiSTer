@@ -1097,6 +1097,7 @@ video video
 	.clk(clk),
 	.reset(reset_nes),
 	.cnt(nes_ce_video),
+	.color(color),
 	.hold_reset(hold_reset),
 	.count_v(scanline),
 	.count_h(cycle),
@@ -1107,7 +1108,8 @@ video video
 	.load_color_index(pal_index),
 	.emphasis(emphasis),
 	.reticle(~status[22] ? reticle : 2'b00),
-	.pal_video(pal_video)
+	.pal_video(pal_video),
+	.show_padding(0)
 );
 
 video_mixer #(260, 0, 1) video_mixer
