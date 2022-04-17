@@ -9,12 +9,16 @@ module video
 	input  [5:0] color,
 	input  [8:0] count_h,
 	input  [8:0] count_v,
-	input        hide_overscan,
+	input  [1:0] hide_overscan,
 	input  [3:0] palette,
 	input  [2:0] emphasis,
 	input  [1:0] reticle,
 	input        pal_video,
 	input        show_padding,
+	input        vblank_orig,
+	input        hblank_orig,
+	input        vsync_orig,
+	input        hsync_orig,
 
 	input        load_color,
 	input [23:0] load_color_data,
@@ -36,8 +40,8 @@ reg pix_ce, pix_ce_n;
 wire [5:0] color_ef = reticle[0] ? (reticle[1] ? 6'h21 : 6'h15) : color;
 
 always @(negedge clk) begin
-	pix_ce   <= ~cnt[1] & ~cnt[0];
-	pix_ce_n <=  cnt[1] & ~cnt[0];
+	pix_ce   <= cnt == 0;
+	pix_ce_n <= cnt == 2;
 end
 
 assign ce_pix = pix_ce;

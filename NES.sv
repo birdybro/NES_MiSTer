@@ -788,6 +788,7 @@ always_ff @(posedge clk) begin
 	end 
 end
 
+wire hsync, vsync, hblank, vblank;
 NES nes (
 	.clk             (clk),
 	.reset_nes       (reset_nes),
@@ -814,6 +815,10 @@ NES nes (
 	.cycle           (cycle),
 	.scanline        (scanline),
 	.mask            (status[28:27]),
+	.vsync           (vsync),
+	.hsync           (hsync),
+	.hblank          (hblank),
+	.vblank          (vblank),
 	// User Input
 	.joypad_out      (joypad_out),
 	.joypad_clock    (joypad_clock),
@@ -1109,7 +1114,11 @@ video video
 	.emphasis(emphasis),
 	.reticle(~status[22] ? reticle : 2'b00),
 	.pal_video(pal_video),
-	.show_padding(0)
+	.show_padding(1),
+	.vblank_orig(vblank),
+	.hblank_orig(hblank),
+	.vsync_orig(vsync),
+	.hsync_orig(hsync)
 );
 
 video_mixer #(260, 0, 1) video_mixer
