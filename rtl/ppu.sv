@@ -82,6 +82,7 @@ logic reset_reg;
 logic [8:0] vblank_start_sl;
 logic [8:0] vblank_end_sl;
 logic skip_en;
+logic v261_last = 0;
 
 // Continuous Intermediates
 logic skip_dot;
@@ -130,7 +131,10 @@ always @(posedge clk) if (reset) begin
 end else begin
 	if (pclk1) begin // The determinaton to advance to the next line is made at pclk1
 		end_of_line <= 0;
-		
+		v261_last <= v_eq_261;
+		if (v261_last)
+			reset_reg <= 0;
+
 		cycle_next <= cycle_next + 1'd1;
 		if (skip_dot || cycle == 340) begin
 			end_of_line <= 1;
@@ -139,15 +143,15 @@ end else begin
 		end
 	end
 
+	// Once the scanline counter reaches end of 260, it gets reset to -1.
+
 	if (pclk0) begin
 		cycle_latch <= cycle_next;
 
 		if (end_of_line) begin
 			scanline_latch <= scanline_next;
 
-			// Once the scanline counter reaches end of 260, it gets reset to -1.
-			if (scanline_latch == vblank_end_sl)
-				reset_reg <= 0;
+
 
 			if (v_eq_255)
 				even_frame_toggle <= ~even_frame_toggle;
@@ -179,6 +183,7 @@ module VramGen (
 	input  logic        h_eq_320_to_335r,
 	input  logic        h_eq_279_to_303,
 	input  logic        hpos_0,
+	input  logic        w2000,
 	input  logic        w2005a,
 	input  logic        w2005b,
 	input  logic        w2006a,
@@ -186,7 +191,6 @@ module VramGen (
 	input  logic        w2007,
 	input  logic        r2007,
 
-	output logic        w2007_delayed,
 	output logic [14:0] vram_addr,
 	output logic  [2:0] fine_x_scroll  // Current fine_x_scroll value
 );
@@ -194,23 +198,32 @@ module VramGen (
 // Temporary VRAM address register
 logic [14:0] vram_t;
 
-// SR To delay 2006 copy to vram_v
-logic [3:0] write_2006_sr;
-logic [4:0] r_or_w_2007;
-logic write_2006;
-
 // All cycle timing signals are delayed by 1 pclk1 and 1 pclk0
 logic [1:0] load_vscroll_next;
 logic [2:0] copy_hscroll;
 logic [1:0] load_hscroll_next;
 logic [1:0] copy_vscroll;
 
-// Other intermediates
-logic [14:0] vram_t_mask;
+// Write signal handling
 logic trigger_2007;
-assign w2007_delayed = r_or_w_2007[3];
+logic write_2006;
+logic w2006b_reg = 0;
+logic w2006b_pipe = 0;
 
+// Other intermediates
+logic [14:0] vram_t_mask, vram_t_reg;
 logic [14:0] vram_v;
+
+assign load_hscroll_next[0] = ((h_mod8_6_or_7r && hpos_0) && (h_lt_256r || h_eq_320_to_335r));
+assign load_vscroll_next[0] = h_eq_255r;
+
+
+assign vram_t[14] = w2005b ? din[2]: w2006a ? 1'b0 : vram_t_reg[14];
+assign vram_t[13:12] = w2005b ? din[1:0]: w2006a ? din[5:4] : vram_t_reg[13:12];
+assign vram_t[11:10] = w2000 ? din[1:0]: w2006a ? din[3:2] : vram_t_reg[11:10];
+assign vram_t[9:8] = w2005b ? din[7:6]: w2006a ? din[1:0] : vram_t_reg[9:8];
+assign vram_t[7:5] = w2005b ? din[5:3]: w2006b ? din[7:5] : vram_t_reg[7:5];
+assign vram_t[4:0] = w2005a ? din[7:3]: w2006b ? din[4:0] : vram_t_reg[4:0];
 
 // VRAM_v reference:
 // [14 13 12] [11 10] [9 8 7 6 5] [4 3 2 1 0]
@@ -218,42 +231,44 @@ logic [14:0] vram_v;
 // Fine X is its own seperate register.
 
 // Performs the glitchy vram_scroll used by Burai Fighter and some others
-assign trigger_2007 = r_or_w_2007[4];
+assign trigger_2007 = w2007 | r2007;
 
 // Mask used to simulate glitchy behavior caused by a 2006 delayed write landing on the same cycle
 // as natural copy from t->v
-assign vram_t_mask = write_2006 ? vram_t : 15'h7FFF;
-//assign write_2006 = write_2006_sr[0] && ~w2006b;
+assign {vram_t_mask[10], vram_t_mask[4:0]} = (write_2006 || copy_hscroll[0]) ? {vram_t[10], vram_t[4:0]} : 6'b11_1111;
+assign {vram_t_mask[14:11], vram_t_mask[9:5]} = (write_2006 || copy_vscroll[0]) ? {vram_t[14:11], vram_t[9:5]} : 9'b1_1111_1111;
 
-//assign copy_vscroll[0] = h_eq_279_to_303 && v_eq_261 && rendering_enabled;
-assign load_vscroll_next[0] = h_eq_255r;
-assign load_hscroll_next[0] = ((h_mod8_6_or_7r && hpos_0) && (h_lt_256r || h_eq_320_to_335r));
+// assign load_vscroll_next[0] = h_eq_255r;
+// assign load_hscroll_next[0] = ((h_mod8_6_or_7r && hpos_0) && (h_lt_256r || h_eq_320_to_335r));
 
 assign vram_addr = vram_v; // gated by pclk0, but shouldn't matter
 
 always @(posedge clk) if (reset) begin
-	vram_t <= 0;
+	vram_t_reg <= 0;
 	fine_x_scroll <= 0;
 	vram_v <= 15'd0;
 	fine_x_scroll <= 3'd0;
-	r_or_w_2007 <= 0;
-	write_2006_sr <= 0;
+	write_2006 <= 0;
+	w2006b_pipe <= 0;
+	w2006b_reg <= 0;
 
 end else begin
 
 	if (pclk0) begin
-		write_2006_sr <= {write_2006_sr[2:0], 1'b0};
-		write_2006 <= write_2006_sr[1];
-		r_or_w_2007 <= {r_or_w_2007[3:0], 1'b0};
+		write_2006 <= w2006b_pipe;
 		copy_vscroll[0] <= h_eq_279_to_303 && v_eq_261 && rendering_enabled;
+		copy_vscroll[1] <= copy_vscroll[0];
 	end
 
 	// Copies from T to V are delayed by 1 pclk1 and then 1 pclk0 cycle after the second 2006 write
 	if (pclk1) begin
-		// load_vscroll_next <= {load_vscroll_next[0], h_eq_255r};
+		w2006b_pipe <= (!w2006b && w2006b_reg);
+		if (write_2006) begin
+			w2006b_reg <= 0;
+			w2006b_pipe <= 0;
+		end
+
 		copy_hscroll <= {copy_hscroll[1:0], h_eq_255r};
-		// load_hscroll_next <= {load_hscroll_next[0], ((h_mod8_6_or_7r && hpos_0) && (h_lt_256r || h_eq_320_to_335r))};
-		
 
 		// Horizontal copy at cycle 257 and rendering OR if delayed 2006 write
 		if (copy_hscroll[0] || write_2006)
@@ -286,34 +301,25 @@ end else begin
 
 		if (~is_rendering && trigger_2007)
 			vram_v <= vram_v + (ppu_incr ? 15'd32 : 15'd1);
-
-		// 2006_write trigger should occur on the next pckl0 after the first pclk1 that occurs after the
-		// w2006b signal goes high.
-		if (w2006b)
-			write_2006_sr <= 4'b0001;
 	end
 
-	if (r2007 || w2007)
-		r_or_w_2007 <= 5'b00001;
-
-	if (write && ain == 0) begin
-		vram_t[10] <= din[0];
-		vram_t[11] <= din[1];
-	end else if (write && ain == 5) begin
-		if (!HVTog) begin
-			vram_t[4:0] <= din[7:3];
-			fine_x_scroll <= din[2:0];
-		end else begin
-			vram_t[9:5] <= din[7:3];
-			vram_t[14:12] <= din[2:0];
-		end
-	end else if (write && ain == 6) begin
-		if (!HVTog) begin
-			vram_t[13:8] <= din[5:0];
-			vram_t[14] <= 0;
-		end else begin
-			vram_t[7:0] <= din;
-		end
+	if (w2000) begin
+		vram_t_reg[10] <= din[0];
+		vram_t_reg[11] <= din[1];
+	end else if (w2005a) begin
+		vram_t_reg[4:0] <= din[7:3];
+		fine_x_scroll <= din[2:0];
+	end else if (w2005b) begin
+		vram_t_reg[9:5] <= din[7:3];
+		vram_t_reg[14:12] <= din[2:0];
+	end else if (w2006a) begin
+		vram_t_reg[13:8] <= din[5:0];
+		vram_t_reg[14] <= 0;
+	end else if (w2006b) begin
+		vram_t_reg[7:0] <= din;
+		// 2006_write trigger should occur on the next pckl0 after the first pclk1 that occurs after the
+		// w2006b signal goes high.
+		w2006b_reg <= w2006b;
 	end
 end
 
@@ -752,14 +758,9 @@ logic [7:0] oam_db;
 logic [7:0] dram_glitch;
 logic [7:0] oam_data_delay;
 logic overflow;
-//assign spr_overflow = overflow;
 
 always_ff @(posedge clk) begin :oam_eval
 reg [1:0] eval_counter;
-
-// if (pclk0) begin
-// 	oam_read_bus <= oam_data;
-// end
 
 if (reset) begin
 	oam_temp_slot <= 0;
@@ -812,12 +813,6 @@ end else if (pclk1) begin
 		masked_sprites <= 0;
 		`endif
 	end
-
-	// if (h_eq_65r)
-	// 	sprite0_curr <= spr_eval_copy_sprite;
-	// if (~h_eq_256_to_319r)
-	// 	sprite0 <= sprite0_curr;
-
 
 	if (oam_state == STATE_CLEAR) begin               // Initialization state
 		if (~write_cycle)
@@ -935,10 +930,6 @@ end else if (pclk1) begin
 			end
 		end
 	end
-
-	// if (h_eq_63_255_or_339_r)
-	// 	oam_temp_slot <= 0;
-
 
 end
 
@@ -1233,7 +1224,6 @@ assign pixel = enable ? {playfield_pipe_4[i], playfield_pipe_3[i], playfield_pip
 
 endmodule  // BgPainter
 
-
 module PixelMuxer(
 	input  logic [3:0] bg,
 	input  logic [3:0] obj,
@@ -1382,29 +1372,29 @@ always_comb begin
 	new_color = color;
 	if (enable) begin
 		if (custom1)
-			new_color = 6'h31;
+			new_color = 6'h31; // Light Blue
 		else if (custom2)
-			new_color = 6'h34;
+			new_color = 6'h34; // Light Purple
 		else if (w2000)
-			new_color = 6'h16;
+			new_color = 6'h16; // Red
 		else if (w2001)
-			new_color = 6'h03;
+			new_color = 6'h03; // Violet
 		else if (r2002)
-			new_color = 6'h17;
+			new_color = 6'h17; // Orange
 		else if (w2003)
-			new_color = 6'h15;
+			new_color = 6'h15; // Pink
 		else if (r2004)
-			new_color = 6'h09;
+			new_color = 6'h09; // Dark Green
 		else if (w2004)
-			new_color = 6'h28;
+			new_color = 6'h28; // Yellow
 		else if (w2005)
-			new_color = 6'h1A;
+			new_color = 6'h1A; // Green
 		else if (w2006)
-			new_color = 6'h12;
+			new_color = 6'h12; // Dim Blue
 		else if (r2007)
-			new_color = 6'h21;
+			new_color = 6'h21; // Medium Blue
 		else if (w2007)
-			new_color = 6'h06;
+			new_color = 6'h06; // Dark Orange
 	end
 end
 
@@ -1442,6 +1432,7 @@ module PPU(
 	input  logic        CE2,              // represents pclk1
 	input  logic  [1:0] SYS_TYPE,         // System type. 0 = NTSC 1 = PAL 2 = Dendy 3 = Vs.
 	input  logic        NES_RESET,        // Indicates reset should be held for 1 frame like US NES
+	input  logic        DEBUG_DOTS,       // enable debug dot drawing
 	output logic        VRAM_R_EX,        // use extra sprite address
 	output logic [13:0] VRAM_A_EX,        // vram address for extra sprites
 	output logic  [5:0] COLOR,            // output color value, one pixel outputted every clock, replaces composite pin
@@ -1494,8 +1485,13 @@ logic [3:0][8:0] hpos;
 logic [3:0][63:0] t;
 logic [8:0] vpos;
 logic [13:0] vram_a;
-
+logic is_rendering_d;
+logic [4:0] w2007_ended;
+logic w2007_reg;
+logic [4:0] r2007_ended;
+logic r2007_reg;
 wire [63:0] t1, t2, t3, t4;
+logic w2007_enabled_d, r2007_enabled_d;
 
 // Wires
 wire obj0_on_line; // True if sprite#0 is included on the current line
@@ -1534,6 +1530,8 @@ wire w2006b = w2006 && HVTog;
 wire w2005a = w2005 && ~HVTog;
 wire w2005b = w2005 && HVTog;
 wire w2007_delayed;
+wire w2007_enabled = w2007_ended[3] && ~w2007_ended[1]; // Writes appear to last two full PPU cycles, so we use the second of the two
+wire r2007_enabled = r2007_ended[3] && ~r2007_ended[1];
 
 // Reads and Writes
 wire read = RW & ~CS_n;
@@ -1542,10 +1540,10 @@ wire write_ce = write & ~write_old;
 wire read_ce = read & ~read_old;
 
 // Palette and VRAM
-wire is_pal_address = &vram_v[13:8];
-wire palette_write = w2007_delayed && is_pal_address && ~is_rendering;
-wire [4:0] pram_addr = t3[IN_VISIBLE_FRAME_R] ? pixel : (is_pal_address ? (w2007_delayed ? w2007_abuf[4:0] : vram_v[4:0]) : (master_mode ? 5'd0 : {1'd0, EXT_IN}));
-wire vram_r_ppudata = r2007;
+wire is_pal_address = &vram_a[13:8] & ~is_rendering_d;
+wire palette_write = w2007_enabled_d && is_pal_address;
+wire [4:0] pram_addr = t3[IN_VISIBLE_FRAME_R] ? pixel : (is_pal_address ? vram_a[4:0] : (master_mode ? 5'd0 : {1'd0, EXT_IN}));
+wire vram_r_ppudata = r2007_enabled;
 wire rendering_enabled = enable_objects | enable_playfield;
 
 // Colors and Masking
@@ -1576,11 +1574,11 @@ assign sprite_vram_addr_ex = 0;
 assign INT_n = ~(vbl_flag && vbl_enable);
 assign EXT_OUT = master_mode ? pram_addr[3:0] : EXT_IN;
 assign DOUT = latched_dout;
-assign VRAM_W = w2007_delayed && ~is_pal_address && ~is_rendering;
-assign VRAM_DOUT = w2007_delayed ? w2007_buf : DIN;
-assign VRAM_R = vram_r_ppudata || (is_rendering && vram_read_cycle);
-assign ALE = is_rendering ? ~vram_read_cycle : (r2007 || w2007_delayed);
-assign VRAM_AB = w2007_delayed ? w2007_abuf[13:0] : vram_a;
+assign VRAM_W = w2007_enabled && ~is_pal_address && ~is_rendering;
+assign VRAM_DOUT = w2007_enabled ? w2007_buf : DIN;
+assign VRAM_R = vram_r_ppudata || (is_rendering_d && vram_read_cycle);
+assign ALE = is_rendering ? ~vram_read_cycle : (r2007 || w2007_enabled);
+assign VRAM_AB = w2007_enabled ? w2007_abuf[13:0] : vram_a;
 assign VRAM_A_EX = {1'b0, sprite_vram_addr_ex};
 //assign COLOR = color1;
 
@@ -1645,9 +1643,9 @@ assign EMPHASIS[1:0] = ~write || held_reset ?
 assign EMPHASIS[2] = ~held_reset && w2001 ? DIN[7] : delay_2001[7];
 
 debug_dots debug_d(
-	.enable     (0),
+	.enable     (DEBUG_DOTS),
 	.color      (color1),
-	.custom1    (0),
+	.custom1    (palette_write),
 	.custom2    (0),
 	.w2000      (w2000),
 	.w2001      (w2001),
@@ -1704,14 +1702,14 @@ VramGen vram_v0(
 	.h_eq_320_to_335r    (t2[H_EQ_320_TO_335R]),
 	.h_eq_279_to_303     (t1[H_EQ_279_TO_303]),
 	.hpos_0              (hpos[2][0]),
+	.w2000               (w2000),
 	.w2005a              (w2005a),
 	.w2005b              (w2005b),
 	.w2006a              (w2006a),
 	.w2006b              (w2006b),
-	.w2007               (w2007),
-	.r2007               (r2007),
+	.w2007               (w2007_enabled_d),
+	.r2007               (r2007_enabled_d),
 	.vram_addr           (vram_v),
-	.w2007_delayed       (w2007_delayed),
 	.fine_x_scroll       (fine_x_scroll)
 );
 
@@ -1865,39 +1863,21 @@ wire blank_low = ~in_range_2;
 logic [12:0] pat_address;
 
 assign t1 = pclk1 ? t[0] : t[1];
-//assign t1 = t[1];
 assign t2 = t[2];
 assign t3 = t[3];
 
-
-//wire vram_read_cycle = ~hpos[2][0];
 wire load_nametable = ~(is_rendering && (((t2[H_LT_256R] || t2[H_EQ_320_TO_335R]) && t2[H_MOD8_2_OR_3R]) || hpos[2][2]));
-//wire load_nametable = t1[H_MOD8_0_OR_1R] && (t1[H_LT_256R] || t1[H_EQ_320_TO_335R]);
 wire load_attrtable = t2[H_MOD8_2_OR_3R] && (t2[H_LT_256R] || t2[H_EQ_320_TO_335R]);
 wire load_pattern1 = t2[H_MOD8_4_OR_5R];
 wire load_pattern2 = t2[H_MOD8_6_OR_7R];
 wire load_sprites = t3[H_EQ_256_TO_319R];
 wire load_sprnt = is_rendering && hpos[2][2];
 
-// wire latch_nametable = t1[H_MOD8_0_OR_1R] && vram_read_cycle;
-// wire latch_attrtable = t1[H_MOD8_2_OR_3R] && vram_read_cycle; //(t1[H_LT_256R] || t1[H_EQ_320_TO_335R])
-// wire latch_pattern1 = t1[H_MOD8_4_OR_5R] && vram_read_cycle;
-// wire latch_pattern2 = t1[H_MOD8_6_OR_7R] && vram_read_cycle;
-
-// wire latch_nametable = load_nametable && vram_read_cycle && is_rendering;
-// wire latch_attrtable = load_attrtable && vram_read_cycle; //(t1[H_LT_256R] || t1[H_EQ_320_TO_335R])
-// wire latch_pattern1 = load_sprnt && ~hpos[2][1] && vram_read_cycle;
-// wire latch_pattern2 = load_sprnt && hpos[2][1] && vram_read_cycle;
-
 logic latch_nametable;
 logic latch_attrtable;
 logic latch_pattern1;
 logic latch_pattern2;
 logic bgr_transparent;
-// wire latch_nametable = t1[H_MOD8_2_OR_3R] && ~vram_read_cycle;
-// wire latch_attrtable = t1[H_MOD8_4_OR_5R] && ~vram_read_cycle; //(t1[H_LT_256R] || t1[H_EQ_320_TO_335R])
-// wire latch_pattern1 = t1[H_MOD8_6_OR_7R] && ~vram_read_cycle;
-// wire latch_pattern2 = t1[H_MOD8_0_OR_1R] && ~vram_read_cycle;
 logic spr0_transparent;
 
 always @(posedge clk) begin
@@ -1912,7 +1892,6 @@ always @(posedge clk) begin
 		sprite0 <= is_obj0_pixel && t1[IN_VISIBLE_FRAME_R] && |obj_pixel[1:0];
 		if (
 			t2[IN_VISIBLE_FRAME_R] &&
-			//~t2[H_EQ_255R]          && // Should be automatic
 			obj0_on_line        &&    // Sprite zero on current line.
 			~spr0_transparent &&
 			bgr_transparent            // Background pixel not transparent.
@@ -1929,33 +1908,22 @@ always @(posedge clk) begin
 		
 	end
 
-	//spr_load <= hpos[2][2] && /hpos[2][1] && /hpos_eq_256_to_319 && rendering[2]
-
 	if (pclk0) begin
 		bgr_transparent <= |bg_pixel[1:0];
 		spr0_transparent <= ~sprite0;
 		// VRAM Address
-		if (t2[H_EQ_256_TO_319R] && load_sprnt)
+		if (t2[H_EQ_256_TO_319R])
 			VRAM_R_EX <= use_ex && EXTRA_SPRITES;
 		else
 			VRAM_R_EX <= 0;
-
-		//vramaddr_v1 ~((rendering and ((hpos_eq_0_to_255_or_320-335_and_hpos_mod_8_eq_2_or_3) or_hpos2)) or write 2007 ended)
-		//vramaddr_v3 hpos_eq_0-255 or 320-335 and hpos mod 8 eq_2 or 3 and rendering
 		
-		vram_read_cycle <= is_rendering && hpos[1][0]; // FIXME: This is off by one. It should read when the cycle is even.
+		vram_read_cycle <= is_rendering && hpos[1][0]; // FIXME: This is off by one. It should read when the cycle is even, but the sdram needs time to read..
 		if (load_nametable)
 			vram_a <= {vram_v[13] | is_rendering, vram_v[12] & ~is_rendering, vram_v[11:0]};                                        // Name Table 1-2
 		else if (load_attrtable)
 			vram_a <= {vram_v[13] | is_rendering, vram_v[12] & ~is_rendering, vram_v[11:10], 4'b1111, vram_v[9:7], vram_v[4:2]};    // Attribute table 3-4
 		else if (load_sprnt)
 			vram_a <= {~(is_rendering & hpos[1][2]), pat_address[12:4], hpos[1][1], pat_address[2:0]};
-		// else if (load_sprites)
-		// 	vram_a <= {~(is_rendering & hpos[1][2]), sprite_vram_addr};                                     // Sprite data
-		// else if (load_pattern1 || load_pattern2)
-		// 	vram_a <= {~(is_rendering & hpos[1][2]), bg_patt, bg_name_table, load_pattern2, vram_v[14:12]};// Pattern table 5,6,7,8
-		// else
-		// 	vram_a <= vram_v[13:0];
 	end
 
 	// Clocked timing gates
@@ -1970,6 +1938,18 @@ always @(posedge clk) begin
 	end
 
 	if (pclk0) begin
+		w2007_enabled_d <= w2007_enabled;
+		r2007_enabled_d <= r2007_enabled;
+
+		w2007_ended[0] <= ~w2007 && w2007_reg;
+		w2007_ended[2] <= w2007_ended[1];
+		w2007_ended[4] <= w2007_ended[3];
+		
+		r2007_ended[0] <= ~r2007 && r2007_reg;
+		r2007_ended[2] <= r2007_ended[1];
+		r2007_ended[4] <= r2007_ended[3];
+
+		is_rendering_d <= is_rendering;
 		if (t[0][H_EQ_279_TO_303] && t[0][V_EQ_244])
 			pos_eq_279_224_to_278_247 <= 1;
 		else if (t[0][H_EQ_279_TO_303] && t[0][V_EQ_247])
@@ -2012,24 +1992,14 @@ always @(posedge clk) begin
 		else
 			latched_dout[4:0] <= 5'b00000;
 	end
-
-	// if (w2000)
-	// 	delay_2000 <= DIN;
 	
-	// if (w2001)
-	// 	delay_2001 <= DIN;
+	if (pclk1) begin
+		w2007_ended[1] <= w2007_ended[0];
+		w2007_ended[3] <= w2007_ended[2];
 
-	// if (r2002) begin
-	// 	if (read_ce)
-	// 		latched_dout[7] <= vbl_flag;
-	// 	if (read) begin
-	// 		latched_dout[5] <= sprite_overflow;
-	// 		latched_dout[6] <= sprite0_hit_bg;
-	// 		hv_latch <= 0;
-	// 		vbl_flag <= 0;
-	// 		refresh_high <= 1'b1;
-	// 	end
-	// end
+		r2007_ended[1] <= r2007_ended[0];
+		r2007_ended[3] <= r2007_ended[2];
+	end
 
 	case (AIN)
 		0: begin // PPU Control Register 1
@@ -2061,6 +2031,8 @@ always @(posedge clk) begin
 		5, 6: if (write) hv_latch <= ~HVTog;
 
 		7: begin
+			if (read)
+				r2007_reg <= 1;
 			if (is_pal_address) begin
 				if (read) begin
 					latched_dout[5:0] <= color3;
@@ -2076,6 +2048,7 @@ always @(posedge clk) begin
 			if (write) begin
 				w2007_buf <= DIN;
 				w2007_abuf <= vram_v;
+				w2007_reg <= 1;
 			end
 		end
 	endcase
@@ -2108,13 +2081,24 @@ always @(posedge clk) begin
 		sprite0 <= 0;
 	end
 
+	if (pclk1) begin
+		if (w2007_ended[2]) begin
+			w2007_reg <= 0;
+		end 
+		if (r2007_ended[2]) begin
+			r2007_reg <= 0;
+		end
+	end
 	if (held_reset) begin
+		is_rendering_d <= 0;
 		vbl_flag <= 0;
 		sprite0_hit_bg <= 0;
 		delay_2000 <= 8'd0;
 		delay_2001 <= 8'd0;
 		latch_2000 <= 8'd0;
 		latch_2001 <= 8'd0;
+		w2007_reg <= 0;
+		r2007_reg <= 0;
 		vram_latch <= 0;
 		HVTog <= 0;
 		hv_latch <= 0;

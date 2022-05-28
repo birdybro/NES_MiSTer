@@ -73,9 +73,11 @@ module NES(
 	input         clk,
 	input         reset_nes,
 	input         cold_reset,
+	input   [1:0] alignment,
 	input         pausecore,
 	output        corepaused,
 	input   [1:0] sys_type,
+	input         ppu_type,
 	output  [1:0] nes_div,
 	input  [63:0] mapper_flags,
 	output [15:0] sample,         // sample generated from APU
@@ -88,6 +90,7 @@ module NES(
 	input         fds_auto_eject,
 	input   [1:0] max_diskside,
 	output  [1:0] diskside,
+	input         debug_dots,
 
 	input   [4:0] audio_channels, // Enabled audio channels
 	input         ex_sprites,
@@ -220,16 +223,16 @@ reg [1:0] div_sys = 2'd0;
 // CE's
 wire cpu_ce  = (div_cpu == div_cpu_n);
 wire ppu_ce  = (div_ppu == div_ppu_n);
-wire cart_ce = (cart_pre & ppu_ce); // First PPU cycle where cpu data is visible.
+wire cart_ce = (cart_pre & (div_cpu == (cpu_tick_count[2] ? 9 : 5))); // First PPU cycle where cpu data is visible.
 
 // Signals
-wire cart_pre  = (ppu_tick == (cpu_tick_count[2] ? 1 : 0));
-wire ppu_read  = (ppu_tick == (cpu_tick_count[2] ? 2 : 1));
-wire ppu_write = (ppu_tick == (cpu_tick_count[2] ? 1 : 0));
+wire cart_pre  = ((cpu_tick_count[2] ? (div_cpu > 5 && div_cpu < 10) : (div_cpu > 0 && div_cpu < 6)));
+// wire ppu_read  = (ppu_tick == (cpu_tick_count[2] ? 2 : 1));
+// wire ppu_write = (ppu_tick == (cpu_tick_count[2] ? 1 : 0));
 
-wire phi2 = (div_cpu > 4 && div_cpu < div_cpu_n);
+wire phi2 = (div_cpu > 6 && div_cpu < div_cpu_n);
 //wire phi2 = (div_cpu > 6) && ~cpu_ce;
-wire m2 = (div_cpu > 4) && ~cpu_ce; // M2 should be visible AT clock cycle 5 (technically goes high after 4.5 cycles)
+wire m2 = (div_cpu > 5) && ~cpu_ce; // M2 should be visible AT clock cycle 5 (technically goes high after 4.5 cycles)
 
 // The infamous NES jitter is important for accuracy, but wreks havok on modern devices and scalers,
 // so what I do here is pause the whole system for one PPU clock and insert a "fake" ppu clock to
@@ -243,7 +246,7 @@ reg [4:0] faux_pixel_cnt;
 wire use_fake_h = freeze_clocks && faux_pixel_cnt > 3;
 reg [1:0] ppu_tick = 0;
 
-reg [1:0] last_sys_type;
+reg [1:0] last_sys_type, last_alignment;
 reg [2:0] cpu_tick_count;
 
 wire skip_ppu_cycle = (cpu_tick_count == 4) && (ppu_tick == 0);
@@ -271,8 +274,10 @@ wire       evenframe_paused;
 
 assign corepaused = corepause_active;
 assign refresh    = corepause_active_delay && ppu_ce_pause;
+reg [3:0] rand_num = 0;
 
 always @(posedge clk) begin
+	rand_num <= rand_num + 1'd1;
 	if (reset_nes) hold_reset <= 1;
 	if (cpu_ce) hold_reset <= 0;
 	if (~freeze_clocks | ~(div_ppu == (div_ppu_n - 1'b1))) begin
@@ -302,7 +307,7 @@ always @(posedge clk) begin
 	if (|faux_pixel_cnt)
 		faux_pixel_cnt <= faux_pixel_cnt - 1'b1;
 
-	if (((skip_pixel && ~corepause_active) || (skip_pixel_pause && corepause_active)) && (faux_pixel_cnt == 0)) begin
+	if (((skip_pixel && ~corepause_active && alignment != 1) || (skip_pixel_pause && corepause_active)) && (faux_pixel_cnt == 0)) begin
 		freeze_clocks <= 1'b1;
 		faux_pixel_cnt <= 8;
 	end
@@ -320,8 +325,9 @@ always @(posedge clk) begin
 
 	// Realign if the system type changes.
 	last_sys_type <= sys_type;
-	if (last_sys_type != sys_type) begin
-		div_cpu <= 5'd1;
+	last_alignment <= reset_nes;
+	if ((last_sys_type != sys_type) || (|alignment && (~reset_nes && last_alignment))) begin
+		div_cpu <= 5'd1 + alignment;
 		div_ppu <= 3'd1;
 		div_sys <= 0;
 		cpu_tick_count <= 0;
@@ -567,6 +573,7 @@ PPU ppu(
 	.CS_n             (~(ppu_cs && m2)),
 	.RESET            (reset),
 	.SYS_TYPE         (sys_type),
+	.NES_RESET        (ppu_type),
 	.COLOR            (color),
 	.DIN              (dbus),
 	.DOUT             (ppu_dout),
@@ -591,6 +598,7 @@ PPU ppu(
 	.VSYNC            (vsync),
 	.HBLANK           (hblank),
 	.VBLANK           (vblank),
+	.DEBUG_DOTS       (debug_dots),
 	// savestates
 	.SaveStateBus_Din       (SaveStateBus_Din        ), 
 	.SaveStateBus_Adr       (SaveStateBus_Adr        ),

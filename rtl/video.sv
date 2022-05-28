@@ -14,7 +14,6 @@ module video
 	input  [2:0] emphasis,
 	input  [1:0] reticle,
 	input        pal_video,
-	input        show_padding,
 	input        vblank_orig,
 	input        hblank_orig,
 	input        vsync_orig,
@@ -185,16 +184,20 @@ always @(posedge clk) begin
 	// number of 224 pixels, so we take off a proportional percentage from the sides to compensate.
 
 	if(pix_ce) begin
-		if(hide_overscan) begin
+		if(hide_overscan == 0) begin
 			vblank <= (vc > (VBL_START - 9)) || (vc < 8);                  // 240 - 16 = 224
-		end else begin
+		end else if (hide_overscan != 3) begin
 			vblank <= (vc >= VBL_START);                                   // 240 lines
+		end else begin
+			vblank <= vblank_orig;//(vc >= VBL_START + 2'd3);                                // 242 lines
 		end
 		
-		if (show_padding)
+		if (hide_overscan == 2)
 			hblank <= (hc >= HBL_START_P && (vc == (VBL_START - 1'd1) || hc <= HBL_END_P)); // 280 pix wide
+		else if (hide_overscan == 3)
+			hblank <= hblank_orig;//(hc >= HBL_START_P && (vc == (VBL_START - 1'd1) || hc <= HBL_END_P - 2'd2)); // 282 pix wide
 		else if (debug_padding)
-			hblank <= (hc >= HBL_START_D && hc <=HBL_END_D);     // ?? pix wide
+			hblank <= (hc >= HBL_START_D || hc <= HBL_END_D); // ??? pix wide
 		else
 			hblank <= (hc >= HBL_START || hc <= HBL_END);     // 256 pix wide
 		

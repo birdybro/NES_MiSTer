@@ -1151,6 +1151,8 @@ if (~enable) begin
 	outer[5:0] <= 6'h3f;    // last bank
 	inner <= 0;
 	selreg <= 1;
+	security <= 0;
+	a53chr   <= 1;
 
 	// Set value for mirroring
 	if (mapper == 2 || mapper == 0 || mapper == 3 || mapper == 94 || mapper == 180 || mapper == 185)
