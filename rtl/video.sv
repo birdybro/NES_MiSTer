@@ -9,11 +9,15 @@ module video
 	input  [5:0] color,
 	input  [8:0] count_h,
 	input  [8:0] count_v,
-	input        hide_overscan,
+	input  [1:0] hide_overscan,
 	input  [3:0] palette,
 	input  [2:0] emphasis,
 	input  [1:0] reticle,
 	input        pal_video,
+	input        vblank_orig,
+	input        hblank_orig,
+	input        vsync_orig,
+	input        hsync_orig,
 
 	input        load_color,
 	input [23:0] load_color_data,
@@ -32,11 +36,11 @@ module video
 );
 
 reg pix_ce, pix_ce_n;
-wire [5:0] color_ef = reticle[0] ? (reticle[1] ? 6'h21 : 6'h15) : is_padding ? 6'd63 : color;
+wire [5:0] color_ef = reticle[0] ? (reticle[1] ? 6'h21 : 6'h15) : color;
 
 always @(negedge clk) begin
-	pix_ce   <= ~cnt[1] & ~cnt[0];
-	pix_ce_n <=  cnt[1] & ~cnt[0];
+	pix_ce   <= cnt == 0;
+	pix_ce_n <= cnt == 2;
 end
 
 assign ce_pix = pix_ce;
@@ -180,29 +184,41 @@ always @(posedge clk) begin
 	// number of 224 pixels, so we take off a proportional percentage from the sides to compensate.
 
 	if(pix_ce) begin
-		if(hide_overscan) begin
-			hblank <= (hc >= HBL_START && hc <= HBL_END);                  // 280 - ((224/240) * 16) = 261.3
+		if(hide_overscan == 0) begin
 			vblank <= (vc > (VBL_START - 9)) || (vc < 8);                  // 240 - 16 = 224
-		end else begin
-			hblank <= (hc >= HBL_START) && (hc <= HBL_END);                // 280 pixels
+		end else if (hide_overscan != 3) begin
 			vblank <= (vc >= VBL_START);                                   // 240 lines
+		end else begin
+			vblank <= vblank_orig;//(vc >= VBL_START + 2'd3);                                // 242 lines
 		end
-		
-		if(hc == 279) begin
+
+		if (hide_overscan == 2)
+			hblank <= (hc >= HBL_START_P && (vc == (VBL_START - 1'd1) || hc <= HBL_END_P)); // 280 pix wide
+		else if (hide_overscan == 3)
+			hblank <= hblank_orig;//(hc >= HBL_START_P && (vc == (VBL_START - 1'd1) || hc <= HBL_END_P - 2'd2)); // 282 pix wide
+		else if (debug_padding)
+			hblank <= (hc >= HBL_START_D || hc <= HBL_END_D); // ??? pix wide
+		else
+			hblank <= (hc >= HBL_START || hc <= HBL_END);     // 256 pix wide
+
+		if(hc == 280) begin
 			HSync <= 1;
 			VSync <= ((vc >= vsync_start) && (vc < vsync_start+3));
 		end
 
-		if(hc == 304) HSync <= 0;
+		if(hc == 305) HSync <= 0;
 	end
 end
 
-localparam HBL_START = 256;
-localparam HBL_END   = 340;
+localparam debug_padding = 0;
+localparam HBL_START = 258;
+localparam HBL_END   = 1;
+localparam HBL_START_P = 270;
+localparam HBL_END_P   = 329;
+localparam HBL_START_D = 275;
+localparam HBL_END_D   = 282;
 localparam VBL_START = 240;
 localparam VBL_END   = 511;
-
-wire is_padding = (hc > 255);
 
 reg dark_r, dark_g, dark_b;
 
