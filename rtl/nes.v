@@ -93,6 +93,7 @@ module NES(
 	input   [4:0] audio_channels, // Enabled audio channels
 	input         ex_sprites,
 	input   [1:0] mask,
+	input   [3:0] nwc_dips, 	 // NWC DIP switches
 
 	// Access signals for the SDRAM.
 	output [24:0] cpumem_addr,
@@ -635,6 +636,7 @@ cart_top multi_mapper (
 	.vram_a10          (vram_a10),                // CIRAM a10 line
 	.vram_ce           (vram_ce),                 // CIRAM chip enable
 	.irq               (mapper_irq),              // IRQ (inverted, active high)
+	.nwc_dips          (nwc_dips),                // NWC DIP switches
 	.audio_in          (audio_mappers),           // Amplified and inverted APU audio
 	.audio             (sample_ext),              // Mixed audio output from cart
 	// SDRAM Communication

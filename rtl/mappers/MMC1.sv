@@ -230,7 +230,8 @@ module NesEvent(
 	inout        irq_b,       // IRQ
 	input [15:0] audio_in,    // Inverted audio from APU
 	inout [15:0] audio_b,     // Mixed audio output
-	inout [15:0] flags_out_b  // flags {0, 0, 0, 0, has_savestate, prg_conflict, prg_bus_write, has_chr_dout}
+	inout [15:0] flags_out_b, // flags {0, 0, 0, 0, has_savestate, prg_conflict, prg_bus_write, has_chr_dout},
+	input  [3:0] nwc_dips     // DIP switches
 );
 
 assign prg_aout_b   = enable ? prg_aout : 22'hZ;
@@ -298,7 +299,7 @@ end else if (ce) begin
 end
 
 // In the official tournament, 'C' was closed, and the others were open, so the counter had to reach $2800000.
-assign irq = (counter[29:25] == 5'b10100);
+assign irq = (counter[29:25] == {1'b1, nwc_dips[3:0]});
 
 always begin
 	if (!prg_ain[15]) begin

@@ -53,6 +53,7 @@ module cart_top (
 	output reg        mapper_prg_write,
 	output reg        mapper_ovr,
 	output reg        irq,
+	input       [3:0] nwc_dips,	   	  // DIP switches for NWC 1990
 	input      [15:0] audio_in,
 	output reg [15:0] audio,          // External Audio
 	output reg  [1:0] diskside,
@@ -1477,9 +1478,10 @@ NesEvent nesev(
 	.vram_a10_b (vram_a10_b),
 	.vram_ce_b  (vram_ce_b),
 	.irq_b      (irq_b),
-	.flags_out_b(flags_out_b),
 	.audio_in   (audio_in),
-	.audio_b    (audio_out_b)
+	.audio_b    (audio_out_b),
+	.flags_out_b(flags_out_b),
+	.nwc_dips   (nwc_dips)
 );
 
 

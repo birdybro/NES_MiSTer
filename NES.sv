@@ -252,6 +252,7 @@ parameter CONF_STR = {
 	"P1OUV,Audio Enable,Both,Internal,Cart Expansion,None;",
 	"P2,Input Options;",
 	"P2-;",
+	"P2oMP,NWC Time,5.001,5.316,5.629,5.942,6.254,6.567,6.880,7.193,7.505,7.818,8.131,8.444,8.756,9.070,9.318,9.695;",
 	"P2O9,Swap Joysticks,No,Yes;",
 	"P2OA,Multitap,Disabled,Enabled;",
 	"P2oJK,SNAC,Off,Controllers,Zapper,3D Glasses;",
@@ -858,6 +859,7 @@ NES nes (
 	.cycle           (cycle),
 	.scanline        (scanline),
 	.mask            (status[28:27]),
+	.nwc_dips		 (status[57:54]),
 	// User Input
 	.joypad_out      (joypad_out),
 	.joypad_clock    (joypad_clock),
