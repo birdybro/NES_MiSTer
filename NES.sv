@@ -520,9 +520,15 @@ localparam [31:0] K_PAL  = 32'd2201376125; // “nearest-math” K for PAL from 
 localparam [31:0] N_VAL  = 32'd1;
 localparam [31:0] M_VAL  = 32'd8;
 
-// C divides for each mode
-localparam [31:0] C0_NTSC = 32'd3, C1_NTSC = 32'd5, C2_NTSC = 32'd10;
-localparam [31:0] C0_PAL  = 32'd2, C1_PAL  = 32'd4, C2_PAL  = 32'd8;
+// NTSC (C0=3, C1=5, C2=10) — odd duty enabled for odd divides
+localparam [31:0] C0_NTSC = (0 << 15) | (1 << 14) | (1 << 8) | (2 << 2);  // hi=1 lo=2 odd=1
+localparam [31:0] C1_NTSC = (0 << 15) | (1 << 14) | (2 << 8) | (3 << 2);  // hi=2 lo=3 odd=1
+localparam [31:0] C2_NTSC = (0 << 15) | (0 << 14) | (5 << 8) | (5 << 2);  // hi=5 lo=5 odd=0
+
+// PAL (C0=2, C1=4, C2=8) — all even divides
+localparam [31:0] C0_PAL = (0 << 15) | (0 << 14) | (1 << 8) | (1 << 2);   // hi=1 lo=1 odd=0
+localparam [31:0] C1_PAL = (0 << 15) | (0 << 14) | (2 << 8) | (2 << 2);   // hi=2 lo=2 odd=0
+localparam [31:0] C2_PAL = (0 << 15) | (0 << 14) | (4 << 8) | (4 << 2);   // hi=4 lo=4 odd=0
 
 reg pald  = 1'b0, pald2 = 1'b0;
 reg [2:0] state = 3'd0;
