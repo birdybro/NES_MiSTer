@@ -504,38 +504,105 @@ pll_cfg pll_cfg
 	.reconfig_from_pll(reconfig_from_pll)
 );
 
-always @(posedge CLK_50M) begin : cfg_block
-	reg pald = 0, pald2 = 0;
-	reg [2:0] state = 0;
+localparam [5:0] ADDR_START = 6'h00;  // Start reconfiguring pll
+localparam [5:0] ADDR_APPLY = 6'h02;  // apply changes to reconfigured pll
+localparam [5:0] ADDR_N     = 6'h01;  // N counter register
+localparam [5:0] ADDR_M     = 6'h03;  // M counter (integer)
+localparam [5:0] ADDR_K     = 6'h07;  // fractional K (your code uses 7)
+localparam [5:0] ADDR_C0    = 6'h08;  // c0 divide (hi/lo packed as per IP)
+localparam [5:0] ADDR_C1    = 6'h09;  // c1 divide
+localparam [5:0] ADDR_C2    = 6'h0A;  // c2 divide
 
+// Two profiles: NTSC (current/default) and PAL
+localparam [31:0] K_NTSC = 32'd2537933971; // NTSC accurate value from pll wizard
+localparam [31:0] K_PAL  = 32'd2201376125; // “nearest-math” K for PAL from pll wizard
+
+localparam [31:0] N_VAL  = 32'd1;
+localparam [31:0] M_VAL  = 32'd8;
+
+// C divides for each mode
+localparam [31:0] C0_NTSC = 32'd3, C1_NTSC = 32'd5, C2_NTSC = 32'd10;
+localparam [31:0] C0_PAL  = 32'd2, C1_PAL  = 32'd4, C2_PAL  = 32'd8;
+
+reg pald  = 1'b0, pald2 = 1'b0;
+reg [2:0] state = 3'd0;
+
+always @(posedge CLK_50M) begin : cfg_block
 	pald  <= status[23];
 	pald2 <= pald;
 
-	cfg_write <= 0;
-	if(pald2 != pald) state <= 1;
+	cfg_write <= 1'b0;
 
-	if(!cfg_waitrequest) begin
-		if(state) state<=state+1'd1;
-		case(state)
-			1: begin
-					cfg_address <= 0;
-					cfg_data <= 0;
-					cfg_write <= 1;
-				end
-			3: begin
-					cfg_address <= 7;
-					cfg_data <= pald2 ? 2201376898 : 2537933971;
-					cfg_write <= 1;
-				end
-			5: begin
-					cfg_address <= 2;
-					cfg_data <= 0;
-					cfg_write <= 1;
-				end
+	// edge-detect -> start reconfig
+	if (pald2 != pald) state <= 3'd1;
+
+	if (!cfg_waitrequest) begin
+		case (state)
+			// Kick "start"/load
+			3'd1: begin
+				cfg_address <= ADDR_START;
+				cfg_data    <= 32'd0;
+				cfg_write   <= 1'b1;
+				state       <= 3'd2;
+			end
+
+			// (Optional) write N
+			3'd2: begin
+				cfg_address <= ADDR_N;
+				cfg_data    <= N_VAL;
+				cfg_write   <= 1'b1;
+				state       <= 3'd3;
+			end
+
+			// (Optional) write M (integer part)
+			3'd3: begin
+				cfg_address <= ADDR_M;
+				cfg_data    <= M_VAL;
+				cfg_write   <= 1'b1;
+				state       <= 3'd4;
+			end
+
+			// Write C0
+			3'd4: begin
+				cfg_address <= ADDR_C0;
+				cfg_data    <= pald2 ? C0_PAL : C0_NTSC;
+				cfg_write   <= 1'b1;
+				state       <= 3'd5;
+			end
+
+			// Write C1
+			3'd5: begin
+				cfg_address <= ADDR_C1;
+				cfg_data    <= pald2 ? C1_PAL : C1_NTSC;
+				cfg_write   <= 1'b1;
+				state       <= 3'd6;
+			end
+
+			// Write C2
+			3'd6: begin
+				cfg_address <= ADDR_C2;
+				cfg_data    <= pald2 ? C2_PAL : C2_NTSC;
+				cfg_write   <= 1'b1;
+				state       <= 3'd7;
+			end
+
+			// Write K (fractional)
+			3'd7: begin
+				cfg_address <= ADDR_K;
+				cfg_data    <= pald2 ? K_PAL : K_NTSC;
+				cfg_write   <= 1'b1;
+				state       <= 3'd0;   // next state issues APPLY
+			end
 		endcase
+
+		// Issue APPLY after the last write
+		if (state == 3'd0 && (pald2 != pald)) begin
+			cfg_address <= ADDR_APPLY;
+			cfg_data    <= 32'd0;
+			cfg_write   <= 1'b1;
+		end
 	end
 end
-
 
 // reset after download
 reg [7:0] download_reset_cnt;
