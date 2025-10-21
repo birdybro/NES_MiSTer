@@ -524,7 +524,7 @@ always @(posedge CLK_50M) begin : cfg_block
 				end
 			3: begin
 					cfg_address <= 7;
-					cfg_data <= pald2 ? 2201376898 : 2537933971;
+					cfg_data <= pald2 ? 2201377585 : 2537933971;
 					cfg_write <= 1;
 				end
 			5: begin
